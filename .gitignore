@@ -1,0 +1,54 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+.venv311/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# Generated outputs
+outputs/
+
+# Uploaded media
+uploads/*.mp4
+uploads/*.mov
+uploads/*.avi
+uploads/*.mkv
+uploads/*.webm
+uploads/*.png
+uploads/*.jpg
+uploads/*.jpeg
+
+# Test media
+test_input.jpg
+test_input.png
+test_output.png
+y35y.PNG
+
+# Model weights
+weights/
+*.pth
+*.pt
+*.ckpt
+
+# Python cache
+.pytest_cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
