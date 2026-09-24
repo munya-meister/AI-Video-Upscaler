@@ -3,33 +3,61 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
-from src.ai_engine.realesrgan_engine import RealESRGANEngine
 from app.services.ffmpeg_tools import ffmpeg_path
 
 
 class AIVideoProcessor:
     """
-    Real-ESRGAN video upscaling pipeline.
+    VIDEL Natural Video Enhancement Engine.
 
-    Pipeline:
+    Processing pipeline:
 
-        Video
-          ↓
+        Input Video
+             ↓
         FFmpeg frame extraction
-          ↓
-        Real-ESRGAN
-          ↓
-        Enhanced frames
-          ↓
+             ↓
+        Real-ESRGAN x4plus
+        NCNN Vulkan GPU
+             ↓
+        4× AI enhanced frame
+             ↓
+        Lanczos downsampling
+             ↓
+        Natural sharpening
+             ↓
         FFmpeg video reconstruction
-          ↓
-        Final MP4
+             ↓
+        Original audio restored
 
-    Important:
-        The original video's FPS is detected with FFprobe and
-        reused when rebuilding the enhanced video. This prevents
-        the output from becoming slow motion.
+    The AI engine always performs 4× enhancement internally.
+
+    Requested output scale controls the final resize:
+
+        1× → 4× AI → downsample to 1×
+        2× → 4× AI → downsample to 2×
+        3× → 4× AI → downsample to 3×
+        4× → 4× AI → keep 4×
+
+    This allows VIDEL to use the stronger x4plus model while
+    producing controlled final output sizes.
     """
+
+    # ==========================================================
+    # CONFIGURATION
+    # ==========================================================
+
+    AI_MODEL = "realesrgan-x4plus"
+
+    AI_SCALE = 4
+
+    # Proven stable setting on the Intel HD 620.
+    AI_TILE = 128
+
+    # Mild sharpening applied AFTER Lanczos reduction.
+    # This is deliberately conservative to avoid waxy/crunchy skin.
+    SHARPEN_FILTER = (
+        "unsharp=5:5:0.25:5:5:0"
+    )
 
     # ==========================================================
     # INITIALIZATION
@@ -38,30 +66,63 @@ class AIVideoProcessor:
     def __init__(
         self,
         model_path=None,
-        tile=256,
+        tile=128,
     ):
-        self.engine = RealESRGANEngine(
-            model_path=model_path,
-            scale=4,
-            tile=tile,
-        )
+        """
+        Initialize the video processor.
+
+        model_path is retained for API compatibility with the
+        previous implementation.
+
+        NCNN uses its own model directory located beside the
+        realesrgan-ncnn-vulkan executable.
+        """
+
+        self.model_path = model_path
+        self.tile = tile if tile is not None else self.AI_TILE
+
+        self.ncnn_executable = self._find_ncnn_executable()
+
+        if self.ncnn_executable is None:
+            raise RuntimeError(
+                "VIDEL could not find the Real-ESRGAN NCNN Vulkan "
+                "executable.\n\n"
+                "Expected:\n"
+                "engines\\realesrgan-ncnn-vulkan\\"
+                "realesrgan-ncnn-vulkan.exe"
+            )
 
     # ==========================================================
     # PUBLIC API
     # ==========================================================
 
     def upscale_video(
-    self,
-    input_path,
-    output_path,
-    outscale=2,
-    progress_callback: Optional[Callable[[int], None]] = None,
-    max_frames: Optional[int] = None,
+        self,
+        input_path,
+        output_path,
+        outscale=2,
+        progress_callback: Optional[Callable[[int], None]] = None,
+        max_frames: Optional[int] = None,
     ):
         """
-        Upscale a complete video using Real-ESRGAN.
+        Upscale a video using Real-ESRGAN NCNN Vulkan.
 
-        The original FPS is preserved.
+        Parameters
+        ----------
+        input_path:
+            Source video.
+
+        output_path:
+            Final video path.
+
+        outscale:
+            Requested final scale: 1, 2, 3 or 4.
+
+        progress_callback:
+            Optional callback receiving integer progress 0-100.
+
+        max_frames:
+            Optional frame limit useful for testing.
         """
 
         input_path = Path(input_path)
@@ -79,6 +140,23 @@ class AIVideoProcessor:
         if not input_path.is_file():
             raise ValueError(
                 f"Input path is not a file: {input_path}"
+            )
+
+        # ------------------------------------------------------
+        # Validate scale
+        # ------------------------------------------------------
+
+        try:
+            outscale = int(outscale)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid output scale: {outscale}"
+            ) from exc
+
+        if outscale not in (1, 2, 3, 4):
+            raise ValueError(
+                "VIDEL currently supports output scales "
+                "of 1×, 2×, 3× or 4×."
             )
 
         output_path.parent.mkdir(
@@ -100,7 +178,7 @@ class AIVideoProcessor:
             )
 
         # ------------------------------------------------------
-        # Detect original FPS
+        # Detect source FPS
         # ------------------------------------------------------
 
         fps = self._get_video_fps(
@@ -108,15 +186,27 @@ class AIVideoProcessor:
             input_path,
         )
 
-        print("=" * 60)
-        print("VIDEL - AI VIDEO UPSCALING")
-        print("=" * 60)
-        print(f"Input : {input_path}")
-        print(f"Output: {output_path}")
-        print("Model : RealESRGAN_x4plus")
-        print(f"Scale : {outscale}x")
-        print(f"FPS   : {fps:.3f}")
-        print("=" * 60)
+        # ------------------------------------------------------
+        # Print processing information
+        # ------------------------------------------------------
+
+        print("=" * 70)
+        print("VIDEL - NATURAL AI VIDEO ENHANCEMENT")
+        print("=" * 70)
+        print(f"Input       : {input_path}")
+        print(f"Output      : {output_path}")
+        print(f"AI Model    : {self.AI_MODEL}")
+        print(f"AI Scale    : {self.AI_SCALE}x")
+        print(f"Output Scale: {outscale}x")
+        print(f"Tile        : {self.tile}")
+        print(f"FPS         : {fps:.3f}")
+        print(f"Vulkan GPU  : Intel / NCNN Vulkan")
+        print("=" * 70)
+
+        self._report_progress(
+            progress_callback,
+            0,
+        )
 
         # ------------------------------------------------------
         # Temporary working directory
@@ -130,6 +220,7 @@ class AIVideoProcessor:
 
             frames_dir = temp_dir / "frames"
             enhanced_dir = temp_dir / "enhanced"
+            final_frames_dir = temp_dir / "final"
 
             frames_dir.mkdir(
                 parents=True,
@@ -141,11 +232,16 @@ class AIVideoProcessor:
                 exist_ok=True,
             )
 
+            final_frames_dir.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
             # ==================================================
             # 1. EXTRACT FRAMES
             # ==================================================
 
-            print("\n[1/3] Extracting video frames...")
+            print("\n[1/4] Extracting original video frames...")
 
             self._extract_frames(
                 ffmpeg=ffmpeg,
@@ -156,8 +252,9 @@ class AIVideoProcessor:
             frames = sorted(
                 frames_dir.glob("frame_*.png")
             )
+
             if max_frames is not None:
-             frames = frames[:max_frames]
+                frames = frames[:max_frames]
 
             if not frames:
                 raise RuntimeError(
@@ -170,72 +267,175 @@ class AIVideoProcessor:
                 f"Extracted {total_frames} frames."
             )
 
+            self._report_progress(
+                progress_callback,
+                5,
+            )
+
             # ==================================================
-            # 2. AI ENHANCEMENT
+            # 2. REAL-ESRGAN NCNN VULKAN
             # ==================================================
 
-            print("\n[2/3] Running Real-ESRGAN...")
+            print(
+                "\n[2/4] Running Real-ESRGAN x4plus "
+                "through NCNN Vulkan..."
+            )
 
             for index, frame_path in enumerate(frames):
 
-                output_frame = (
+                enhanced_frame = (
                     enhanced_dir
                     / frame_path.name
                 )
 
-                self.engine.upscale_image(
-                    frame_path,
-                    output_frame,
-                    outscale=outscale,
+                self._upscale_frame_ncnn(
+                    input_frame=frame_path,
+                    output_frame=enhanced_frame,
                 )
 
-                percent = int(
-                    ((index + 1) / total_frames) * 100
+                # AI stage occupies 5-80%.
+                ai_percent = int(
+                    5
+                    + (
+                        (index + 1)
+                        / total_frames
+                    )
+                    * 75
                 )
 
-                if progress_callback:
-                    progress_callback(percent)
+                self._report_progress(
+                    progress_callback,
+                    ai_percent,
+                )
 
-                # Print progress every 10 frames
-                # and always print first/last frame.
                 if (
                     index == 0
-                    or (index + 1) % 10 == 0
+                    or (index + 1) % 5 == 0
                     or index == total_frames - 1
                 ):
                     print(
                         f"AI progress: "
                         f"{index + 1}/{total_frames} "
-                        f"({percent}%)"
+                        f"({ai_percent}%)"
                     )
 
             # ==================================================
-            # 3. REBUILD VIDEO
+            # 3. OUTPUT SCALING + NATURAL SHARPENING
             # ==================================================
 
-            print("\n[3/3] Rebuilding video...")
+            print(
+                "\n[3/4] Creating final output frames..."
+            )
+
+            for index, frame_path in enumerate(frames):
+
+                enhanced_frame = (
+                    enhanced_dir
+                    / frame_path.name
+                )
+
+                final_frame = (
+                    final_frames_dir
+                    / frame_path.name
+                )
+
+                self._prepare_final_frame(
+                    ffmpeg=ffmpeg,
+                    input_frame=enhanced_frame,
+                    output_frame=final_frame,
+                    outscale=outscale,
+                )
+
+                # Final-frame stage occupies 80-90%.
+                final_percent = int(
+                    80
+                    + (
+                        (index + 1)
+                        / total_frames
+                    )
+                    * 10
+                )
+
+                self._report_progress(
+                    progress_callback,
+                    final_percent,
+                )
+
+            # ==================================================
+            # 4. REBUILD VIDEO
+            # ==================================================
+
+            print(
+                "\n[4/4] Rebuilding final video..."
+            )
 
             self._rebuild_video(
                 ffmpeg=ffmpeg,
                 input_path=input_path,
-                enhanced_dir=enhanced_dir,
+                enhanced_dir=final_frames_dir,
                 output_path=output_path,
                 fps=fps,
+            )
+
+            self._report_progress(
+                progress_callback,
+                100,
             )
 
         # ======================================================
         # COMPLETE
         # ======================================================
 
-        print("\n" + "=" * 60)
-        print("AI VIDEO UPSCALING COMPLETE")
-        print("=" * 60)
+        print("\n" + "=" * 70)
+        print("VIDEL VIDEO ENHANCEMENT COMPLETE")
+        print("=" * 70)
         print(f"Saved: {output_path}")
-
-        if progress_callback:
-            progress_callback(100)
+        print("=" * 70)
 
         return output_path
+
+    # ==========================================================
+    # NCNN DISCOVERY
+    # ==========================================================
+
+    def _find_ncnn_executable(self):
+        """
+        Locate the Real-ESRGAN NCNN Vulkan executable.
+
+        Expected project structure:
+
+            videl/
+            ├── engines/
+            │   └── realesrgan-ncnn-vulkan/
+            │       ├── realesrgan-ncnn-vulkan.exe
+            │       ├── models/
+            │       └── ...
+        """
+
+        project_root = Path(__file__).resolve().parents[2]
+
+        executable = (
+            project_root
+            / "engines"
+            / "realesrgan-ncnn-vulkan"
+            / "realesrgan-ncnn-vulkan.exe"
+        )
+
+        if executable.exists():
+            return executable
+
+        # Fallback: relative to current working directory.
+        fallback = (
+            Path.cwd()
+            / "engines"
+            / "realesrgan-ncnn-vulkan"
+            / "realesrgan-ncnn-vulkan.exe"
+        )
+
+        if fallback.exists():
+            return fallback
+
+        return None
 
     # ==========================================================
     # FFMPEG DISCOVERY
@@ -243,8 +443,7 @@ class AIVideoProcessor:
 
     def _find_ffmpeg(self):
         """
-        Locate FFmpeg using VIDEL's central FFmpeg discovery
-        system.
+        Locate FFmpeg through VIDEL's central discovery system.
         """
 
         return ffmpeg_path()
@@ -259,45 +458,34 @@ class AIVideoProcessor:
         input_path,
     ):
         """
-        Get the original video's frame rate using FFprobe.
-
-        Examples of values FFprobe may return:
-
-            30/1
-            60/1
-            30000/1001
-            24000/1001
+        Detect the original video's frame rate using FFprobe.
         """
 
         ffprobe = Path(
             ffmpeg
         ).with_name("ffprobe.exe")
 
-        # ------------------------------------------------------
-        # Check FFprobe
-        # ------------------------------------------------------
-
         if not ffprobe.exists():
 
-            # Try the central VIDEL FFprobe discovery system.
-            from app.services.ffmpeg_tools import ffprobe_path
+            try:
+                from app.services.ffmpeg_tools import ffprobe_path
 
-            discovered_ffprobe = ffprobe_path()
+                discovered_ffprobe = ffprobe_path()
 
-            if discovered_ffprobe is None:
-                raise RuntimeError(
-                    "FFprobe was not found. "
-                    "FFprobe is required to preserve the "
-                    "original video's frame rate."
-                )
+                if discovered_ffprobe is not None:
+                    ffprobe = Path(
+                        discovered_ffprobe
+                    )
 
-            ffprobe = Path(
-                discovered_ffprobe
+            except ImportError:
+                pass
+
+        if not ffprobe.exists():
+            raise RuntimeError(
+                "FFprobe was not found. "
+                "FFprobe is required to preserve "
+                "the original video's FPS."
             )
-
-        # ------------------------------------------------------
-        # FFprobe command
-        # ------------------------------------------------------
 
         command = [
             str(ffprobe),
@@ -321,7 +509,6 @@ class AIVideoProcessor:
         )
 
         if result.returncode != 0:
-
             raise RuntimeError(
                 "Could not determine video FPS:\n"
                 + result.stderr
@@ -330,14 +517,9 @@ class AIVideoProcessor:
         fps_string = result.stdout.strip()
 
         if not fps_string:
-
             raise RuntimeError(
                 "FFprobe returned no FPS information."
             )
-
-        # ------------------------------------------------------
-        # Parse FPS
-        # ------------------------------------------------------
 
         try:
 
@@ -356,7 +538,6 @@ class AIVideoProcessor:
                 )
 
                 if denominator == 0:
-
                     raise ValueError(
                         "FPS denominator is zero."
                     )
@@ -380,7 +561,6 @@ class AIVideoProcessor:
             ) from exc
 
         if fps <= 0:
-
             raise RuntimeError(
                 f"Invalid video FPS: {fps}"
             )
@@ -398,9 +578,9 @@ class AIVideoProcessor:
         frames_dir,
     ):
         """
-        Extract every video frame as a PNG.
+        Extract the video's original frames.
 
-        No FPS conversion is performed here.
+        No FPS conversion is performed.
         """
 
         frame_pattern = (
@@ -409,7 +589,7 @@ class AIVideoProcessor:
         )
 
         command = [
-            ffmpeg,
+            str(ffmpeg),
 
             "-y",
 
@@ -421,7 +601,6 @@ class AIVideoProcessor:
             "-i",
             str(input_path),
 
-            # Keep the original frame timing.
             "-fps_mode",
             "passthrough",
 
@@ -444,6 +623,213 @@ class AIVideoProcessor:
             )
 
     # ==========================================================
+    # NCNN FRAME UPSCALING
+    # ==========================================================
+
+    def _upscale_frame_ncnn(
+        self,
+        input_frame,
+        output_frame,
+    ):
+        """
+        Run one frame through Real-ESRGAN x4plus
+        using the NCNN Vulkan executable.
+
+        The working directory is explicitly set to the
+        NCNN installation directory so the executable can
+        reliably find its models.
+        """
+
+        executable = self.ncnn_executable
+
+        if executable is None:
+            raise RuntimeError(
+                "NCNN Vulkan executable is unavailable."
+            )
+
+        engine_dir = executable.parent
+
+        command = [
+            str(executable),
+
+            "-i",
+            str(input_frame),
+
+            "-o",
+            str(output_frame),
+
+            "-n",
+            self.AI_MODEL,
+
+            "-s",
+            str(self.AI_SCALE),
+
+            "-g",
+            "0",
+
+            "-t",
+            str(self.tile),
+
+            "-v",
+        ]
+
+        result = subprocess.run(
+            command,
+            cwd=str(engine_dir),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        if result.returncode != 0:
+
+            raise RuntimeError(
+                "Real-ESRGAN NCNN Vulkan failed.\n\n"
+                f"Input: {input_frame}\n"
+                f"Output: {output_frame}\n\n"
+                f"STDOUT:\n{result.stdout}\n\n"
+                f"STDERR:\n{result.stderr}"
+            )
+
+        if not output_frame.exists():
+
+            raise RuntimeError(
+                "Real-ESRGAN completed without creating "
+                f"the expected output frame:\n{output_frame}"
+            )
+
+        if output_frame.stat().st_size <= 0:
+
+            raise RuntimeError(
+                "Real-ESRGAN created an empty output frame:\n"
+                f"{output_frame}"
+            )
+
+    # ==========================================================
+    # FINAL FRAME PREPARATION
+    # ==========================================================
+
+    def _prepare_final_frame(
+        self,
+        ffmpeg,
+        input_frame,
+        output_frame,
+        outscale,
+    ):
+        """
+        Convert the internal 4× AI result into the requested
+        final output scale.
+
+        For 2×:
+
+            4× AI
+              ↓
+            Lanczos 2×
+              ↓
+            subtle sharpening
+
+        This is our current Natural Quality pipeline.
+        """
+
+        # ------------------------------------------------------
+        # 4× output
+        # ------------------------------------------------------
+
+        if outscale == 4:
+
+            filter_chain = (
+                "format=rgb24,"
+                + self.SHARPEN_FILTER
+            )
+
+        # ------------------------------------------------------
+        # 3× output
+        # ------------------------------------------------------
+
+        elif outscale == 3:
+
+            filter_chain = (
+                "scale=iw*3/4:"
+                "ih*3/4:"
+                "flags=lanczos+accurate_rnd,"
+                + self.SHARPEN_FILTER
+            )
+
+        # ------------------------------------------------------
+        # 2× output
+        # ------------------------------------------------------
+
+        elif outscale == 2:
+
+            filter_chain = (
+                "scale=iw/2:"
+                "ih/2:"
+                "flags=lanczos+accurate_rnd,"
+                + self.SHARPEN_FILTER
+            )
+
+        # ------------------------------------------------------
+        # 1× output
+        # ------------------------------------------------------
+
+        else:
+
+            filter_chain = (
+                "scale=iw/4:"
+                "ih/4:"
+                "flags=lanczos+accurate_rnd,"
+                + self.SHARPEN_FILTER
+            )
+
+        command = [
+            str(ffmpeg),
+
+            "-y",
+
+            "-hide_banner",
+
+            "-loglevel",
+            "error",
+
+            "-i",
+            str(input_frame),
+
+            "-vf",
+            filter_chain,
+
+            "-frames:v",
+            "1",
+
+            "-update",
+            "1",
+
+            str(output_frame),
+        ]
+
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        if result.returncode != 0:
+
+            raise RuntimeError(
+                "FFmpeg final-frame processing failed:\n"
+                + result.stderr
+            )
+
+        if not output_frame.exists():
+
+            raise RuntimeError(
+                "FFmpeg did not create the final frame:\n"
+                f"{output_frame}"
+            )
+
+    # ==========================================================
     # VIDEO REBUILD
     # ==========================================================
 
@@ -456,11 +842,11 @@ class AIVideoProcessor:
         fps,
     ):
         """
-        Rebuild the video from enhanced frames.
+        Rebuild the final video.
 
-        IMPORTANT:
-            Uses the ORIGINAL FPS instead of hardcoding
-            30 FPS. This prevents slow-motion output.
+        The enhanced frames use the ORIGINAL FPS.
+
+        Original audio is copied through AAC encoding.
         """
 
         frame_pattern = (
@@ -469,7 +855,7 @@ class AIVideoProcessor:
         )
 
         command = [
-            ffmpeg,
+            str(ffmpeg),
 
             "-y",
 
@@ -483,20 +869,20 @@ class AIVideoProcessor:
             # --------------------------------------------------
 
             "-framerate",
-            str(fps),
+            f"{fps:.12f}",
 
             "-i",
             str(frame_pattern),
 
             # --------------------------------------------------
-            # Original video
+            # Original video/audio source
             # --------------------------------------------------
 
             "-i",
             str(input_path),
 
             # --------------------------------------------------
-            # Video encoder
+            # Video
             # --------------------------------------------------
 
             "-c:v",
@@ -522,7 +908,7 @@ class AIVideoProcessor:
             "192k",
 
             # --------------------------------------------------
-            # Stream mapping
+            # Mapping
             # --------------------------------------------------
 
             "-map",
@@ -532,14 +918,10 @@ class AIVideoProcessor:
             "1:a?",
 
             # --------------------------------------------------
-            # Keep video/audio duration aligned
+            # Duration
             # --------------------------------------------------
 
             "-shortest",
-
-            # --------------------------------------------------
-            # Output
-            # --------------------------------------------------
 
             str(output_path),
         ]
@@ -559,10 +941,6 @@ class AIVideoProcessor:
                 + result.stderr
             )
 
-        # ------------------------------------------------------
-        # Validate output
-        # ------------------------------------------------------
-
         if not output_path.exists():
 
             raise RuntimeError(
@@ -575,3 +953,24 @@ class AIVideoProcessor:
             raise RuntimeError(
                 "FFmpeg created an empty output video."
             )
+
+    # ==========================================================
+    # PROGRESS
+    # ==========================================================
+
+    @staticmethod
+    def _report_progress(
+        progress_callback,
+        value,
+    ):
+        """
+        Safely report progress.
+        """
+
+        value = max(
+            0,
+            min(100, int(value)),
+        )
+
+        if progress_callback:
+            progress_callback(value)

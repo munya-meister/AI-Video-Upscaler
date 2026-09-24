@@ -35,10 +35,9 @@ ENHANCEMENT_MODELS = [
 
 OUTPUT_RESOLUTIONS = [
     "Original",
-    "1080p",
-    "1440p",
-    "4K UHD",
-    "8K",
+    "2×",
+    "3×",
+    "4×",
 ]
 
 ENHANCEMENT_MODES = [
