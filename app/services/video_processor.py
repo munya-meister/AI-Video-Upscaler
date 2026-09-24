@@ -185,6 +185,11 @@ class FFmpegEnhancementWorker(QObject):
 
                 # Limit frames during development/testing.
                 if self.test_max_frames is not None:
+                    frames_to_remove = frames[self.test_max_frames :]
+
+                    for frame_path in frames_to_remove:
+                        frame_path.unlink(missing_ok=True)
+
                     frames = frames[: self.test_max_frames]
 
                     print(f"TEST MODE: processing only " f"{len(frames)} frame(s).")
