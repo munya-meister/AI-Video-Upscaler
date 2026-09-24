@@ -271,20 +271,21 @@ class FFmpegEnhancementWorker(QObject):
         finally:
             self.finished.emit()
 
-    def _enhance_frame(
+    def _enhance_frames_batch(
         self,
-        input_frame: Path,
-        output_frame: Path,
+        frames_dir: Path,
+        enhanced_dir: Path,
     ):
-        """Run Real-ESRGAN x4plus through NCNN Vulkan."""
+        """Run all extracted frames through Real-ESRGAN in one NCNN process."""
+
         ai_scale = 2 if self.job.resolution in ("Original", "2×") else 4
 
         command = [
             str(self.ncnn_exe),
             "-i",
-            str(input_frame),
+            str(frames_dir),
             "-o",
-            str(output_frame),
+            str(enhanced_dir),
             "-n",
             self.model_name,
             "-s",
@@ -310,29 +311,25 @@ class FFmpegEnhancementWorker(QObject):
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
 
-        result = subprocess.run(
-            command,
-            **kwargs,
-        )
+        print(f"Starting batch AI enhancement (tile={self.tile}, scale={ai_scale}x)...")
+
+        result = subprocess.run(command, **kwargs)
 
         if result.returncode != 0:
             detail = (
                 result.stderr.strip()
                 or result.stdout.strip()
-                or ("NCNN exited with code " f"{result.returncode}.")
+                or f"NCNN exited with code {result.returncode}."
             )
+            raise RuntimeError("Real-ESRGAN Vulkan batch processing failed:\n" + detail)
 
-            raise RuntimeError("Real-ESRGAN Vulkan failed:\n" + detail)
+        output_frames = sorted(enhanced_dir.glob("frame_*.png"))
 
-        if not output_frame.exists():
-            raise RuntimeError(
-                "Real-ESRGAN completed but did not create:\n" f"{output_frame}"
-            )
+        if not output_frames:
+            raise RuntimeError("Real-ESRGAN completed but produced no enhanced frames.")
 
-        if output_frame.stat().st_size <= 0:
-            raise RuntimeError(
-                "Real-ESRGAN created an empty frame:\n" f"{output_frame}"
-            )
+        if any(frame.stat().st_size <= 0 for frame in output_frames):
+            raise RuntimeError("Real-ESRGAN created one or more empty output frames.")
 
     def _scale_frames(
         self,
