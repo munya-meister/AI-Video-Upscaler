@@ -207,32 +207,25 @@ class FFmpegEnhancementWorker(QObject):
 
                 print("\n[2/4] Running Real-ESRGAN NCNN Vulkan...")
 
-                for index, frame_path in enumerate(frames):
+                if self._stop:
+                    raise RuntimeError("Video processing was stopped.")
 
-                    if self._stop:
-                        raise RuntimeError("Video processing was stopped.")
+                self._enhance_frames_batch(
+                    frames_dir=frames_dir,
+                    enhanced_dir=enhanced_dir,
+                )
 
-                    output_frame = enhanced_dir / frame_path.name
+                enhanced_frames = sorted(enhanced_dir.glob("frame_*.png"))
 
-                    self._enhance_frame(
-                        frame_path,
-                        output_frame,
+                if len(enhanced_frames) != total_frames:
+                    raise RuntimeError(
+                        "Real-ESRGAN did not produce the expected number of frames.\n"
+                        f"Expected: {total_frames}\n"
+                        f"Created: {len(enhanced_frames)}"
                     )
 
-                    # AI stage occupies 0-75%.
-                    percent = max(
-                        1,
-                        int(((index + 1) / total_frames) * 75),
-                    )
-
-                    self.progress.emit(percent)
-
-                    if index == 0 or (index + 1) % 5 == 0 or index == total_frames - 1:
-                        print(
-                            f"AI progress: "
-                            f"{index + 1}/{total_frames} "
-                            f"({percent}%)"
-                        )
+                print(f"AI completed: {len(enhanced_frames)}/{total_frames} frames.")
+                self.progress.emit(75)
 
                 # --------------------------------------------------
                 # 3. Scale output
