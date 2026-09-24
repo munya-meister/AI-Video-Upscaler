@@ -294,6 +294,8 @@ class FFmpegEnhancementWorker(QObject):
             str(self.tile),
             "-g",
             "0",
+            "-j",
+            "1:1:1",
             "-f",
             "png",
             "-v",
