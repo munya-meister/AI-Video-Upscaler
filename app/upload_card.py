@@ -15,6 +15,7 @@ from app.theme import *
 
 class UploadCard(QFrame):
     file_selected = Signal(str)  # Signal emitted when a file is selected
+    workspace_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -128,7 +129,7 @@ class UploadCard(QFrame):
         self.browse.setFixedHeight(50)
         self.browse.clicked.connect(self.browse_files)
 
-        self.browse_another = QPushButton("Browse Another Video")
+        self.browse_another = QPushButton("Change File")
         self.browse_another.setCursor(Qt.PointingHandCursor)
         self.browse_another.setFixedHeight(50)
         self.browse_another.clicked.connect(self.browse_files)
@@ -175,7 +176,12 @@ class UploadCard(QFrame):
         self.support.setText("Ready for enhancement")
         
         # Change the button to "Change File"
-        self.browse.setText("Change File")
+        self.browse.setText("Open Workspace")
+        try:
+            self.browse.clicked.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        self.browse.clicked.connect(self.workspace_requested.emit)
         self.browse_another.show()
 
     def show_error_message(self, message):

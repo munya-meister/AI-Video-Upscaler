@@ -15,6 +15,7 @@ from app.services.project_service import project_service
 class Dashboard(QWidget):
 
     projects_changed = Signal()
+    workspace_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -93,6 +94,7 @@ class Dashboard(QWidget):
 
         upload_card = UploadCard()
         upload_card.file_selected.connect(self.handle_file_selected)
+        upload_card.workspace_requested.connect(self.workspace_requested.emit)
         content.addWidget(upload_card)
 
         self.recent_projects = RecentProjects()
@@ -117,3 +119,4 @@ class Dashboard(QWidget):
         project_service.import_video(file_path)
         self.recent_projects.refresh()
         self.projects_changed.emit()
+        self.workspace_requested.emit()
