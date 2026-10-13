@@ -43,6 +43,7 @@ class VidelWindow(QMainWindow):
         self.stack.addWidget(self.enhance_page)
 
         self.sidebar.section_changed.connect(self.show_section)
+        self.dashboard.workspace_requested.connect(lambda: self.show_section("AI Enhance"))
         self.dashboard.projects_changed.connect(self.projects_page.refresh)
         self.dashboard.projects_changed.connect(self.enhance_page.load_current_project)
         self.enhance_page.projects_changed.connect(self.dashboard.recent_projects.refresh)
