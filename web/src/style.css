@@ -8,3 +8,5 @@
 .hero{position:relative;isolation:isolate;overflow:hidden;background:linear-gradient(90deg,rgba(8,8,13,.97) 0%,rgba(10,8,15,.9) 45%,rgba(12,7,15,.3) 100%),url("/bg.jpg") center right/cover no-repeat;border-color:#612534}
 .hero>*{position:relative;z-index:1}.hero p{color:#ddd0d5}.hero h2{text-shadow:0 3px 28px #000c}
 @media(max-width:720px){.hero{background-image:linear-gradient(90deg,rgba(8,8,13,.96),rgba(10,8,15,.75)),url("/bg.jpg");background-position:62% center}}
+
+.auth-input{width:100%;border:1px solid #563039;background:#25191e;color:#fff;border-radius:10px;padding:13px}.job-progress{border:1px solid #62313c;background:#27151b;border-radius:12px;padding:15px;margin:14px 0;display:grid;gap:10px}.job-progress strong{font-size:13px}.job-progress small{color:#c5aeb5}
