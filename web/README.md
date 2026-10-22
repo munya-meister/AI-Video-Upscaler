@@ -33,3 +33,7 @@ Do not expose a local file-processing API to public internet. Do not commit engi
 
 ## Notes
 Browser playback depends on the video's codec. Files remain local for preview. There is no cloud upload in this foundation.
+
+## Cloud GPU integration
+
+Set Vercel environment variables: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (public publishable/anon key only), `VITE_VIDEL_API_URL` (HTTPS GPU backend). The GPU backend is separately deployed from `cloud/`; see `cloud/README.md`. No GPU processing occurs in Vercel. Users sign in via Supabase email magic links before uploading. Enhanced downloads require a completed authenticated job.
