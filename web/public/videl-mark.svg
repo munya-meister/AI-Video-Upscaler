@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="VIDEL 3D V logo">
+<defs><linearGradient id="steel" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f5f5f5"/><stop offset=".22" stop-color="#59616b"/><stop offset=".49" stop-color="#15171c"/><stop offset=".73" stop-color="#d7d9dd"/><stop offset="1" stop-color="#292a30"/></linearGradient><linearGradient id="red" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#ff7373"/><stop offset=".35" stop-color="#e80013"/><stop offset=".65" stop-color="#76000a"/><stop offset="1" stop-color="#ff1b2e"/></linearGradient><filter id="glow"><feGaussianBlur stdDeviation="5"/></filter></defs>
+<rect width="256" height="256" rx="38" fill="#08090c"/><circle cx="128" cy="122" r="96" fill="none" stroke="#ff1427" stroke-width="8" opacity=".55" filter="url(#glow)"/><circle cx="128" cy="122" r="96" fill="none" stroke="#ed1727" stroke-width="2"/>
+<path d="M22 56 L76 56 L128 172 L180 56 L234 56 L149 225 L108 225 Z" fill="#100d12" stroke="#ff2534" stroke-width="10" filter="url(#glow)"/>
+<path d="M22 56 L76 56 L128 172 L180 56 L234 56 L149 225 L108 225 Z" fill="url(#steel)" stroke="#f01b2c" stroke-width="3" stroke-linejoin="round"/>
+<path d="M40 67 L68 67 L127 196 L188 67 L216 67 L140 214 L116 214 Z" fill="url(#red)" opacity=".9"/>
+<path d="M22 56 L76 56 L128 172 L180 56 L234 56" fill="none" stroke="#fff" stroke-width="2" opacity=".6"/><path d="M108 225 L149 225" stroke="#ff4051" stroke-width="3"/></svg>
