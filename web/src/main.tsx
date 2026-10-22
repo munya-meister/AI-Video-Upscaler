@@ -35,7 +35,7 @@ function App() {
   const importButton = <button className="primary" onClick={() => input.current?.click()}><UploadCloud size={18}/> Import video <ArrowRight size={17}/></button>;
   return <div className="shell">
     <aside className="sidebar">
-      <div className="brand"><img className="brand-icon" src="/videl-mark.svg" alt="VIDEL metallic red V logo"/><span>VIDEL<small>AI VIDEO STUDIO</small></span></div>
+      <div className="brand"><img className="brand-icon" src="/logo.jpg" alt="VIDEL V logo"/><span>VIDEL<small>AI VIDEO STUDIO</small></span></div>
       <div className="side-label">STUDIO</div>
       <nav>
         <button className={tab==="dashboard"?"active":""} onClick={()=>setTab("dashboard")}><Monitor size={19}/> Dashboard</button>
