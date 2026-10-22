@@ -21,13 +21,12 @@ from jwt import PyJWKClient
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
 
 from engine import enhance, probe
 
 SUPABASE_URL = os.environ.get("VIDEL_SUPABASE_URL", "").rstrip("/")
 if not SUPABASE_URL or urlparse(SUPABASE_URL).scheme != "https" or not re.fullmatch(
-    r"[a-zA-Z0-9-]+\\.supabase\\.co", urlparse(SUPABASE_URL).hostname or ""
+    r"[a-zA-Z0-9-]+\.supabase\.co", urlparse(SUPABASE_URL).hostname or ""
 ):
     raise RuntimeError("Set VIDEL_SUPABASE_URL to your HTTPS Supabase project URL")
 JWKS = PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json", cache_keys=True)
